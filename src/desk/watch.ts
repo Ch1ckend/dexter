@@ -13,22 +13,7 @@
 import { account, positions } from '@/tools/broker/alpaca-exec';
 import { runGrade } from './grade.js';
 import { runLearn } from './learn.js';
-
-const PULSE_URL = process.env.PULSE_URL || 'http://localhost:31337/notify';
-
-/** Best-effort Pulse notification — never throws (the cycle must not depend on it). */
-async function notify(message: string): Promise<boolean> {
-  try {
-    const res = await fetch(PULSE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, voice_enabled: false }),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
+import { notify } from './notify.js';
 
 async function portfolioSummary(): Promise<string> {
   const [a, p] = await Promise.all([account(), positions()]);
@@ -56,8 +41,9 @@ async function main(): Promise<void> {
   console.log(msg);
   for (const line of g.lines) console.log('  ' + line);
 
-  const pushed = await notify(msg);
-  console.log(pushed ? '🔔 Pulse notified.' : '🔕 Pulse unavailable (notification skipped).');
+  const sent = await notify(msg);
+  const channels = [sent.pulse && 'Pulse', sent.discord && 'Discord'].filter(Boolean).join(' + ');
+  console.log(channels ? `🔔 Notified: ${channels}.` : '🔕 No notification channel reachable.');
 }
 
 main().catch((e: unknown) => {

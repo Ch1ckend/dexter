@@ -21,26 +21,12 @@ import { decide } from './decide.js';
 import { strategize } from './strategy.js';
 import { account, guardrails, quote, positionFor, placeOrder } from '@/tools/broker/alpaca-exec';
 import { appendDecision, makeId, type DeskDecision, type DeskAction } from './journal.js';
+import { notify } from './notify.js';
 import type { ResearchReport } from './research/types.js';
 import type { Decision } from './decide.js';
 import type { Strategy } from './strategy.js';
 
 const DEFAULT_CONFIDENCE = 0.6;
-const PULSE_URL = process.env.PULSE_URL || 'http://localhost:31337/notify';
-
-/** Best-effort Pulse notification — never throws (a missing Pulse must not fail an unattended run). */
-async function notify(message: string): Promise<boolean> {
-  try {
-    const res = await fetch(PULSE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, voice_enabled: false }),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
 
 interface Args {
   tickers: string[];
@@ -236,8 +222,9 @@ async function main(): Promise<void> {
   if (args.execute && results.length) {
     const placed = results.filter((e) => e.executed).length;
     const summary = results.map((e) => `${e.ticker} ${e.executionNote}`).join(' · ');
-    const pushed = await notify(`🌅 Desk nightly (paper): ${placed} order(s) placed / ${results.length} evaluated. ${summary}`);
-    console.log(pushed ? '\n🔔 Pulse notified.' : '\n🔕 Pulse unavailable (notification skipped).');
+    const sent = await notify(`🌅 Desk nightly (paper): ${placed} order(s) placed / ${results.length} evaluated. ${summary}`);
+    const channels = [sent.pulse && 'Pulse', sent.discord && 'Discord'].filter(Boolean).join(' + ');
+    console.log(channels ? `\n🔔 Notified: ${channels}.` : '\n🔕 No notification channel reachable.');
   }
 }
 
