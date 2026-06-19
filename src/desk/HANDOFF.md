@@ -57,6 +57,17 @@ resolveCik (company name, EDGAR)
 also registered as agent tool `alpaca_paper` in `src/tools/registry.ts`. **All guardrails live in the
 CLI**, not here — a refusal is surfaced as a refusal, never worked around.
 
+**Protective exits (added 2026-06-19):** every conviction BUY is placed as an Alpaca **bracket**
+order — `placeOrder(..., {takeProfit, stop})` → CLI `buy … --take-profit --stop` — so the
+take-profit + stop-loss legs auto-activate the instant the entry fills (GTC, broker-enforced).
+`src/desk/monitor.ts` is the **backstop**: it sweeps open longs and attaches a protective **OCO**
+(CLI `protect <sym> --take-profit --stop`) to any position lacking a working sell exit, using the
+journaled target/stop. **The `_ALPACA` CLI was extended** for this (bracket on buy, `protect` OCO,
+`orders --status`, `clock`) — the Mac source is `~/.claude/skills/_ALPACA/Tools/Alpaca.ts`; the VPS
+copy at `/root/alpaca-skill/` was updated via `scp`. Bracket order acceptance verified on the VPS
+2026-06-19 (place non-filling bracket → accepted → cancel); live fill→exit activates on the first
+real BUY ≥0.7.
+
 **Legacy committee (kept, NOT primary):** `run.ts`, `debate.ts`, `roles.ts`, `behavioral.ts`,
 `dossier.ts`. The bull/bear/skeptic/risk/behavioral/judge debate. `src/desk/README.md` documents this
 era and is **stale** re: architecture — reconcile it to the research swarm when convenient.
@@ -162,8 +173,11 @@ Run exactly one runner at a time — two share the same paper account + 25/day c
   - `desk-review.timer` → `scripts/desk-review-linux.sh` — **Mon–Fri 16:30 ET** (after close):
     `watch.ts` = grade past BUY/SELL vs price + portfolio summary + notify; **Fridays add `--learn`**
     (playbook re-distill). The self-review heartbeat.
-  - Manage: `systemctl status|start desk-{nightly,review}.service`, `systemctl list-timers`,
-    `journalctl -u desk-{nightly,review}.service`.
+  - `desk-monitor.timer` → `scripts/desk-monitor-linux.sh` — **every 15 min, Mon–Fri**:
+    `monitor.ts` = reconcile open positions, attach a protective OCO to any unprotected long.
+    Self-gates on market hours (skips when closed). The exit backstop.
+  - Manage: `systemctl status|start desk-{nightly,review,monitor}.service`, `systemctl list-timers`,
+    `journalctl -u desk-{nightly,review,monitor}.service`.
   - **Sync note:** `desk-review-linux.sh` was `scp`'d to the VPS ahead of a push. Next time you
     `git pull` on the VPS, run it as `cd /root/dexter && git stash -u && git pull --ff-only &&
     git stash drop` so the untracked copy doesn't block the merge (contents are identical).
@@ -224,8 +238,9 @@ Run exactly one runner at a time — two share the same paper account + 25/day c
 
 1. **Position sizing is code-based** (confidence-scaled, guardrail-capped in `research-run.ts`
    `executeAndJournal`). The user may want an **agent that reasons over size** — easy add.
-2. **No open-position management** — the strategist sets target/stop, but nothing monitors open
-   positions to act on them. Consider a monitor that places/updates OCO-style exits.
+2. ~~**No open-position management**~~ — **DONE 2026-06-19.** Conviction buys are bracket orders
+   (target/stop attached at fill); `monitor.ts` (every 15 min) is the OCO backstop for any
+   unprotected long. See §2 "Protective exits". (Live fill→exit verifies on the first real BUY ≥0.7.)
 3. ~~**Cron not wired for `--execute`**~~ — **DONE 2026-06-19.** launchd job runs the full
    watchlist with `--execute` nightly at 08:30 ET (see §6, "Autonomous nightly run"). `watch.ts`
    remains the separate grade+notify heartbeat.
