@@ -156,10 +156,17 @@ Run exactly one runner at a time — two share the same paper account + 25/day c
   pointed to via `ALPACA_CLI` in `/root/dexter/.env`.
 - **Creds:** all in `/root/dexter/.env` (bun auto-loads): the 4 data keys + `APCA_*` paper creds +
   `DESK_DISCORD_WEBHOOK` + `ALPACA_CLI` + `PAI_DIR=/root/.pai`. (No `~/.zshenv` needed on Linux.)
-- **Schedule:** systemd `desk-nightly.timer` → `desk-nightly.service` → `scripts/desk-nightly-linux.sh`
-  (portable bash wrapper, weekday-guarded). Fires **Mon–Fri 08:30 ET**. Manage:
-  `systemctl status|start desk-nightly.service`, `systemctl list-timers desk-nightly.timer`,
-  `journalctl -u desk-nightly.service`.
+- **Schedules (two systemd timers, both weekday-only, box on ET):**
+  - `desk-nightly.timer` → `scripts/desk-nightly-linux.sh` — **Mon–Fri 08:30 ET**: research +
+    `--execute` over the watchlist (the trader).
+  - `desk-review.timer` → `scripts/desk-review-linux.sh` — **Mon–Fri 16:30 ET** (after close):
+    `watch.ts` = grade past BUY/SELL vs price + portfolio summary + notify; **Fridays add `--learn`**
+    (playbook re-distill). The self-review heartbeat.
+  - Manage: `systemctl status|start desk-{nightly,review}.service`, `systemctl list-timers`,
+    `journalctl -u desk-{nightly,review}.service`.
+  - **Sync note:** `desk-review-linux.sh` was `scp`'d to the VPS ahead of a push. Next time you
+    `git pull` on the VPS, run it as `cd /root/dexter && git stash -u && git pull --ff-only &&
+    git stash drop` so the untracked copy doesn't block the merge (contents are identical).
 - **Notifications:** Discord webhook (`src/desk/notify.ts` fires Pulse + Discord; on the VPS Pulse
   no-ops, Discord carries the morning summary).
 - **State on VPS:** `/root/.pai/MEMORY/TRADING/` (journal + alpaca audit/state). Separate from the Mac.
