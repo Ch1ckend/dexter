@@ -144,16 +144,39 @@ bun run typecheck    # 0 errors
 bun test             # 86 pass
 ```
 
-### Autonomous nightly run (launchd) — wired 2026-06-19
-- **Wrapper:** `scripts/desk-nightly.sh` — weekday-guarded, runs `research-run.ts --watchlist
-  --execute --confidence 0.7 --model openrouter:openai/gpt-4o-mini`. zsh sources `~/.zshenv`
-  (Alpaca creds) on every invocation, so it works from the non-login launchd shell.
-- **launchd plist:** committed template `scripts/com.dexter.desk-nightly.plist`; live copy
-  installed at `~/Library/LaunchAgents/com.dexter.desk-nightly.plist`. Fires **08:30 system-local
-  = 08:30 ET** (this machine is on America/New_York). Logs → `~/.dexter/logs/desk-nightly.{out,err}`.
-- On `--execute` runs, `research-run.ts` POSTs a one-line summary to Pulse (best-effort).
-- Manage: `launchctl load|unload|start com.dexter.desk-nightly`. **Verified 2026-06-19** via
-  `launchctl start`: all 7 tickers evaluated, HOLD across the board (0 orders), Pulse pinged.
+### Autonomous nightly run — PRIMARY: Hostinger VPS (deployed 2026-06-19)
+**The Desk now runs 24/7 on a Hostinger VPS, not the Mac.** The Mac launchd job is **disarmed**
+(plist removed from `~/Library/LaunchAgents/`; template kept at `scripts/com.dexter.desk-nightly.plist`).
+Run exactly one runner at a time — two share the same paper account + 25/day cap.
+
+- **VPS:** `srv1764032.hstgr.cloud` (`2.24.193.163`), Debian 13, root via SSH key. Local alias
+  `ssh dexter` (key `~/.ssh/dexter`, config `~/.ssh/config`). TZ set to **America/New_York**.
+- **Code:** `/root/dexter` (the `Ch1ckend/dexter` clone). Update with `ssh dexter 'cd /root/dexter && git pull'`.
+- **Guardrail CLI:** `_ALPACA` copied to `/root/alpaca-skill/` (`Tools/Alpaca.ts` + `guardrails.yaml`);
+  pointed to via `ALPACA_CLI` in `/root/dexter/.env`.
+- **Creds:** all in `/root/dexter/.env` (bun auto-loads): the 4 data keys + `APCA_*` paper creds +
+  `DESK_DISCORD_WEBHOOK` + `ALPACA_CLI` + `PAI_DIR=/root/.pai`. (No `~/.zshenv` needed on Linux.)
+- **Schedule:** systemd `desk-nightly.timer` → `desk-nightly.service` → `scripts/desk-nightly-linux.sh`
+  (portable bash wrapper, weekday-guarded). Fires **Mon–Fri 08:30 ET**. Manage:
+  `systemctl status|start desk-nightly.service`, `systemctl list-timers desk-nightly.timer`,
+  `journalctl -u desk-nightly.service`.
+- **Notifications:** Discord webhook (`src/desk/notify.ts` fires Pulse + Discord; on the VPS Pulse
+  no-ops, Discord carries the morning summary).
+- **State on VPS:** `/root/.pai/MEMORY/TRADING/` (journal + alpaca audit/state). Separate from the Mac.
+- **Verified 2026-06-19:** Alpaca paper reachable ($100k), guardrails load, Discord 204, full
+  watchlist `--execute` via `systemctl start` succeeded (all HOLD, Discord notified). Next auto-run
+  Mon 2026-06-22 08:30 ET.
+- **Pending hardening (manual):** disable SSH password auth (a cloud-init drop-in still enables it).
+  Drop `PasswordAuthentication no` into `/etc/ssh/sshd_config.d/00-hardening.conf`, `sshd -t`,
+  `systemctl reload ssh`. Key auth already works, so this is safe.
+- **Proxmox later:** identical Linux setup ports 1:1 (clone repo, copy `_ALPACA`, `.env`, the bash
+  wrapper + systemd units, set TZ). Carry `/root/.pai/MEMORY/TRADING/` to keep journal history.
+
+### macOS launchd (legacy, now disarmed)
+- **Wrapper:** `scripts/desk-nightly.sh` (zsh, sources `~/.zshenv` for creds). Template plist
+  `scripts/com.dexter.desk-nightly.plist`. Re-arm only if retiring the VPS:
+  `cp scripts/com.dexter.desk-nightly.plist ~/Library/LaunchAgents/ && launchctl load …`
+  (and disarm the VPS timer first).
 
 ---
 
