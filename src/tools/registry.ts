@@ -20,6 +20,7 @@ import { memoryGetTool, MEMORY_GET_DESCRIPTION, memorySearchTool, MEMORY_SEARCH_
 import { discoverSkills } from '../skills/index.js';
 import { createSpawnSubagent, SPAWN_SUBAGENT_DESCRIPTION } from './subagent/spawn-subagent.js';
 import { createAskUserQuestion, ASK_USER_QUESTION_DESCRIPTION } from './ask-user-question/ask-user-question.js';
+import { createAlpacaExecTool, ALPACA_EXEC_DESCRIPTION } from './broker/alpaca-exec.js';
 
 /**
  * A registered tool with its rich description for system prompt injection.
@@ -156,6 +157,13 @@ export function getToolRegistry(model: string): RegisteredTool[] {
       tool: memoryUpdateTool,
       description: MEMORY_UPDATE_DESCRIPTION,
       compactDescription: 'Add, edit, or delete persistent memory entries.',
+      concurrencySafe: false,
+    },
+    {
+      name: 'alpaca_paper',
+      tool: createAlpacaExecTool(),
+      description: ALPACA_EXEC_DESCRIPTION,
+      compactDescription: 'Read the Alpaca PAPER account and place guardrailed paper orders (allowlist, notional caps, daily limit, paper-only).',
       concurrencySafe: false,
     },
   ];
