@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Desk — nightly autonomous paper-trading run.
+
+  Install (adjust paths if your home dir differs from /Users/christopherrittich):
+    mkdir -p ~/.dexter/logs
+    cp scripts/com.dexter.desk-nightly.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.dexter.desk-nightly.plist
+  Trigger a one-off run on demand:
+    launchctl start com.dexter.desk-nightly
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.dexter.desk-nightly.plist
+
+  Runs 08:30 in system-local time. This machine is on America/New_York, so that
+  is 08:30 ET pre-market (before the 09:30 open). If you move the machine to a
+  different timezone, adjust the Hour below. The weekday guard lives in the
+  wrapper script, so the schedule fires daily and the script self-skips weekends.
+  /bin/zsh -lc sources ~/.zshenv (Alpaca creds) + login PATH (so `bun` resolves);
+  $HOME is expanded by zsh, keeping the program path portable.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dexter.desk-nightly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>$HOME/Projects/dexter/scripts/desk-nightly.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>8</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/christopherrittich/.dexter/logs/desk-nightly.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/christopherrittich/.dexter/logs/desk-nightly.err</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
