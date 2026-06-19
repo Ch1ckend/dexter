@@ -69,6 +69,22 @@ export interface OrderResult {
   qty: string;
   type: string;
   status: string;
+  order_class?: string;
+}
+/** A row from the `orders` listing (id/symbol/side/type/order_class/status). */
+export interface OrderInfo {
+  id: string;
+  symbol: string;
+  side: string;
+  qty: string;
+  type: string;
+  order_class: string;
+  status: string;
+}
+export interface Clock {
+  is_open: boolean;
+  next_open: string;
+  next_close: string;
 }
 export interface GuardrailInfo {
   paper_only: boolean;
@@ -126,6 +142,10 @@ export const account = () => runAlpaca<AccountInfo>(['account']);
 export const positions = () => runAlpaca<Position[]>(['positions']);
 export const guardrails = () => runAlpaca<GuardrailInfo>(['guardrails']);
 export const quote = (symbol: string) => runAlpaca<Quote>(['quote', symbol.toUpperCase()]);
+export const clock = () => runAlpaca<Clock>(['clock']);
+/** List orders, optionally filtered by status (e.g. 'open'). */
+export const orders = (status?: string) =>
+  runAlpaca<OrderInfo[]>(status ? ['orders', '--status', status] : ['orders']);
 
 /** Find the current open position for a symbol, or null. Returns null on error. */
 export async function positionFor(symbol: string): Promise<Position | null> {
@@ -134,15 +154,34 @@ export async function positionFor(symbol: string): Promise<Position | null> {
   return res.data.find((p) => p.symbol === symbol.toUpperCase()) ?? null;
 }
 
+/** Protective bracket legs for a long entry: take-profit above, stop-loss below. */
+export interface BracketLegs {
+  takeProfit: number;
+  stop: number;
+}
+
 export function placeOrder(
   side: 'buy' | 'sell',
   symbol: string,
   qty: number,
   limit?: number,
+  bracket?: BracketLegs,
 ): Promise<ExecResult<OrderResult>> {
   const args = [side, symbol.toUpperCase(), String(qty)];
   if (limit !== undefined) args.push('--limit', String(limit));
+  // Bracket exits are buy-only; the CLI rejects them on a sell.
+  if (bracket && side === 'buy') {
+    args.push('--take-profit', String(bracket.takeProfit), '--stop', String(bracket.stop));
+  }
   return runAlpaca<OrderResult>(args);
+}
+
+/**
+ * Attach a protective OCO exit (take-profit + stop-loss) to an already-held long.
+ * Used by the reconcile monitor for positions not opened via a bracket buy.
+ */
+export function protect(symbol: string, takeProfit: number, stop: number): Promise<ExecResult<OrderResult>> {
+  return runAlpaca<OrderResult>(['protect', symbol.toUpperCase(), '--take-profit', String(takeProfit), '--stop', String(stop)]);
 }
 
 // --- Agent-facing tool ------------------------------------------------------

@@ -136,10 +136,18 @@ async function executeAndJournal(
     if (qty < 1) {
       executionNote = `size $${sizeUsd.toFixed(0)} < 1 share at entry $${strategy.entryPrice} — skipped`;
     } else {
-      const res = await placeOrder('buy', ticker, qty, strategy.entryPrice); // LIMIT at ideal entry
+      // Attach the strategist's target/stop as a protective bracket so the exit
+      // activates the moment the entry fills — but only if the legs are sane
+      // (target > entry > stop); otherwise fall back to a plain limit buy.
+      const bracket =
+        strategy.targetPrice > strategy.entryPrice && strategy.stopPrice > 0 && strategy.stopPrice < strategy.entryPrice
+          ? { takeProfit: strategy.targetPrice, stop: strategy.stopPrice }
+          : undefined;
+      const res = await placeOrder('buy', ticker, qty, strategy.entryPrice, bracket); // LIMIT at ideal entry
       executed = res.ok;
       orderId = res.ok ? res.data.id : null;
-      executionNote = res.ok ? `LIMIT buy ${qty} @ $${strategy.entryPrice}` : res.refused ? `REFUSED: ${res.reason}` : `ERROR: ${res.error}`;
+      const exitNote = bracket ? ` + bracket TP $${strategy.targetPrice}/SL $${strategy.stopPrice}` : ' (no bracket — bad legs)';
+      executionNote = res.ok ? `LIMIT buy ${qty} @ $${strategy.entryPrice}${exitNote}` : res.refused ? `REFUSED: ${res.reason}` : `ERROR: ${res.error}`;
     }
   } else {
     // SELL — only trim an existing long (no shorting), as a limit at the target.
