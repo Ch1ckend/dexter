@@ -172,6 +172,7 @@ async function executeAndJournal(
     sizeUsd: shouldAct ? sizeUsd : 0,
     qty,
     confidence: decision.confidence,
+    oneLiner: decision.oneLiner,
     thesisDigest: decision.rationale,
     debateDigest: researchDigest,
     priceAtDecision: price,
@@ -190,6 +191,39 @@ async function executeAndJournal(
   };
   await appendDecision(entry);
   return entry;
+}
+
+const ACTION_DOT: Record<DeskAction, string> = { BUY: '🟢', SELL: '🔴', HOLD: '🟡' };
+
+/**
+ * Render a run as the "Investment Council" summary: a header with the BUY/HOLD/SELL
+ * tally, then one block per name — colored dot, action, confidence, price, and the
+ * analyst's one-sentence reasoning. Used for both Pulse and the Discord webhook.
+ */
+export function buildRunSummary(rows: DeskDecision[], placed: number): string {
+  const date = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const buys = rows.filter((r) => r.action === 'BUY').map((r) => r.ticker);
+  const sells = rows.filter((r) => r.action === 'SELL').map((r) => r.ticker);
+  const holds = rows.filter((r) => r.action === 'HOLD').length;
+  const buyPart = `${buys.length} BUY${buys.length ? ` (${buys.join(', ')})` : ''}`;
+  const sellPart = `${sells.length} SELL${sells.length ? ` (${sells.join(', ')})` : ''}`;
+  const orderLine = placed > 0 ? `${placed} order(s) placed` : 'no orders placed';
+
+  const head = [
+    `📊 Investment Council — Full Run · ${date}`,
+    `${rows.length} names · ${buyPart} · ${holds} HOLD · ${sellPart}`,
+    `Paper desk · research/decisions only · ${orderLine}`,
+    '',
+  ];
+  const body = rows.map((r) => {
+    const dot = ACTION_DOT[r.action] ?? '⚪';
+    const conf = `${Math.round(r.confidence * 100)}%`;
+    const px = r.priceAtDecision != null ? ` @ $${r.priceAtDecision}` : '';
+    // Prefer the crisp one-liner; fall back to the first sentence of the thesis.
+    const reason = (r.oneLiner?.trim() || r.thesisDigest?.split('. ')[0] || '').trim();
+    return `${dot} **${r.ticker}** — ${r.action} (${conf})${px}\n${reason}`;
+  });
+  return [...head, ...body].join('\n');
 }
 
 async function main(): Promise<void> {
@@ -229,14 +263,15 @@ async function main(): Promise<void> {
   // Unattended-run summary: ping Pulse with one line of what happened (nightly cron path).
   if (args.execute && results.length) {
     const placed = results.filter((e) => e.executed).length;
-    const summary = results.map((e) => `${e.ticker} ${e.executionNote}`).join(' · ');
-    const sent = await notify(`🌅 Desk nightly (paper): ${placed} order(s) placed / ${results.length} evaluated. ${summary}`);
+    const sent = await notify(buildRunSummary(results, placed));
     const channels = [sent.pulse && 'Pulse', sent.discord && 'Discord'].filter(Boolean).join(' + ');
     console.log(channels ? `\n🔔 Notified: ${channels}.` : '\n🔕 No notification channel reachable.');
   }
 }
 
-main().catch((e: unknown) => {
-  console.error(e instanceof Error ? e.stack : String(e));
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((e: unknown) => {
+    console.error(e instanceof Error ? e.stack : String(e));
+    process.exit(1);
+  });
+}

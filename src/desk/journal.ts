@@ -26,6 +26,8 @@ export interface DeskDecision {
   qty?: number;
   /** Judge confidence 0..1. */
   confidence: number;
+  /** One crisp sentence summarizing the call (thesis + risk + verdict), for notifications. */
+  oneLiner?: string;
   /** One-paragraph thesis the judge committed to. */
   thesisDigest: string;
   /** Compressed record of the committee debate. */

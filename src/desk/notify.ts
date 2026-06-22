@@ -24,17 +24,40 @@ async function postPulse(message: string): Promise<boolean> {
   }
 }
 
+/** Split on line boundaries into chunks that fit Discord's 2000-char content cap. */
+function chunkForDiscord(message: string, limit = 1900): string[] {
+  const chunks: string[] = [];
+  let cur = '';
+  for (const line of message.split('\n')) {
+    // A single over-long line is hard-sliced; normal lines pack greedily.
+    const piece = line.length > limit ? line.slice(0, limit) : line;
+    if (cur.length + piece.length + 1 > limit) {
+      if (cur) chunks.push(cur);
+      cur = piece;
+    } else {
+      cur = cur ? `${cur}\n${piece}` : piece;
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks.length ? chunks : [''];
+}
+
 async function postDiscord(message: string): Promise<boolean> {
   const url = process.env.DESK_DISCORD_WEBHOOK;
   if (!url) return false;
   try {
-    // Discord webhooks expect { content }, capped at 2000 chars.
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: message.slice(0, 1900) }),
-    });
-    return res.ok;
+    // Discord webhooks expect { content }, capped at 2000 chars — post in order,
+    // splitting long summaries so the full per-name reasoning always lands.
+    let allOk = true;
+    for (const content of chunkForDiscord(message)) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      allOk = allOk && res.ok;
+    }
+    return allOk;
   } catch {
     return false;
   }
