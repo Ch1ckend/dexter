@@ -28,6 +28,10 @@ export interface DeskDecision {
   confidence: number;
   /** One crisp sentence summarizing the call (thesis + risk + verdict), for notifications. */
   oneLiner?: string;
+  /** The specific findings that most drove the call (grounds the interactive bot). */
+  keyDrivers?: string[];
+  /** The key risks the desk is accepting (grounds the interactive bot). */
+  risks?: string[];
   /** One-paragraph thesis the judge committed to. */
   thesisDigest: string;
   /** Compressed record of the committee debate. */

@@ -173,6 +173,8 @@ async function executeAndJournal(
     qty,
     confidence: decision.confidence,
     oneLiner: decision.oneLiner,
+    keyDrivers: decision.keyDrivers,
+    risks: decision.risks,
     thesisDigest: decision.rationale,
     debateDigest: researchDigest,
     priceAtDecision: price,

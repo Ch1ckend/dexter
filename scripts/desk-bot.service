@@ -1,0 +1,20 @@
+[Unit]
+# The Desk — interactive Discord bot (always-on). Answers questions about the
+# desk's decisions, grounded in the journal. Install on the VPS as:
+#   cp scripts/desk-bot.service /etc/systemd/system/ && systemctl daemon-reload
+#   systemctl enable --now desk-bot.service
+# Requires DESK_DISCORD_BOT_TOKEN in /root/dexter/.env (bun auto-loads it).
+Description=The Desk - interactive Discord research bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/dexter
+Environment=PATH=/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/root/.bun/bin/bun run /root/dexter/src/desk/bot.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
