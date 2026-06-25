@@ -16,7 +16,10 @@ export interface LearningRecord {
   /** Full ISO timestamp of the pass. */
   generatedAt: string;
   total: number;
+  /** Closed (final) trades the record is built from. */
   graded: number;
+  /** Trades still open and maturing (provisional, not in the win rate). */
+  open: number;
   good: number;
   bad: number;
   neutral: number;
@@ -70,7 +73,7 @@ export function renderLearning(records: LearningRecord[]): string {
   if (!records.length) return 'The desk has no learning recorded yet.';
   return records
     .map((r) => {
-      const head = `${r.date}: ${r.graded}/${r.total} graded · ${r.good}W/${r.bad}L/${r.neutral}N · win rate ${(r.winRate * 100).toFixed(0)}% · avg in-favor ${(r.avgReturnPct * 100).toFixed(1)}%`;
+      const head = `${r.date}: ${r.graded} closed (${r.open ?? 0} open) · ${r.good}W/${r.bad}L/${r.neutral}N · win rate ${(r.winRate * 100).toFixed(0)}% · avg in-favor ${(r.avgReturnPct * 100).toFixed(1)}%`;
       const methods = r.methods.length ? r.methods.map((m) => `  - ${m}`).join('\n') : '  - (no methods distilled)';
       return `${head}\n${methods}`;
     })

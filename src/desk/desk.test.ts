@@ -102,18 +102,27 @@ describe('computeLearning', () => {
     executed: true, executionNote: '', ...over,
   });
 
-  it('reports zero graded and a build-a-record method on an all-HOLD journal', () => {
-    const s = computeLearning([mk({ action: 'HOLD', grade: undefined })]);
+  it('reports zero closed trades and a build-a-record method on an all-HOLD journal', () => {
+    const s = computeLearning([mk({ action: 'HOLD', executed: false, grade: undefined })]);
     expect(s.graded).toBe(0);
     expect(s.methods.join(' ')).toMatch(/track record|size small|real positions/i);
   });
 
-  it('computes win rate and calibration from graded trades', () => {
+  it('does NOT count an OPEN trade in the win rate — it only tracks it', () => {
+    const s = computeLearning([mk({ grade: 'good', returnPct: 0.1, gradeFinal: false })]);
+    expect(s.graded).toBe(0); // no closed trades
+    expect(s.open).toBe(1);
+    expect(s.methods.join(' ')).toMatch(/open|maturing/i);
+  });
+
+  it('builds win rate and calibration from CLOSED (final) trades only', () => {
     const s = computeLearning([
-      mk({ grade: 'good', confidence: 0.8, returnPct: 0.1 }),
-      mk({ grade: 'bad', confidence: 0.6, returnPct: -0.1 }),
+      mk({ grade: 'good', confidence: 0.8, returnPct: 0.1, gradeFinal: true }),
+      mk({ grade: 'bad', confidence: 0.6, returnPct: -0.1, gradeFinal: true }),
+      mk({ grade: 'good', confidence: 0.9, returnPct: 0.2, gradeFinal: false }), // open — ignored
     ]);
     expect(s.graded).toBe(2);
+    expect(s.open).toBe(1);
     expect(s.winRate).toBeCloseTo(0.5, 5);
     expect(s.calibrated).toBe(true); // winners (0.8) more confident than losers (0.6)
   });
@@ -121,7 +130,7 @@ describe('computeLearning', () => {
 
 describe('recentLearning', () => {
   const rec = (date: string): LearningRecord => ({
-    date, generatedAt: `${date}T20:00:00.000Z`, total: 1, graded: 0, good: 0, bad: 0,
+    date, generatedAt: `${date}T20:00:00.000Z`, total: 1, graded: 0, open: 0, good: 0, bad: 0,
     neutral: 0, winRate: 0, avgReturnPct: 0, methods: [],
   });
 

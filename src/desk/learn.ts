@@ -32,7 +32,10 @@ function avg(xs: number[]): number {
 
 export interface LearningStats {
   total: number;
+  /** Count of CLOSED (final) trades the record is built from. */
   graded: number;
+  /** Count of still-open trades being tracked provisionally. */
+  open: number;
   good: number;
   bad: number;
   neutral: number;
@@ -52,20 +55,26 @@ export interface LearningStats {
  * numbers, the calibration check, the loss-preceding biases, and the derived
  * methods. Both the playbook (latest snapshot) and the learning log (daily history)
  * are rendered from this — so the desk's memory and its recall never disagree.
+ *
+ * The record is built from FINAL (closed) trades only — open positions are tracked
+ * but don't count toward win rate, so a long-horizon book isn't judged on day-one
+ * marks. Open trades are surfaced separately so the desk knows what's still cooking.
  */
 export function computeLearning(journal: DeskDecision[]): LearningStats {
-  const graded = journal.filter((e) => e.grade);
-  const good = graded.filter((e) => e.grade === 'good');
-  const bad = graded.filter((e) => e.grade === 'bad');
-  const neutral = graded.filter((e) => e.grade === 'neutral');
+  const gradedAll = journal.filter((e) => e.grade && e.executed);
+  const final = gradedAll.filter((e) => e.gradeFinal);
+  const openTrades = gradedAll.filter((e) => !e.gradeFinal);
+  const good = final.filter((e) => e.grade === 'good');
+  const bad = final.filter((e) => e.grade === 'bad');
+  const neutral = final.filter((e) => e.grade === 'neutral');
   const decided = good.length + bad.length;
   const winRate = decided ? good.length / decided : 0;
-  const avgReturnPct = avg(graded.map((e) => e.returnPct ?? 0));
+  const avgReturnPct = avg(final.map((e) => e.returnPct ?? 0));
 
   const byAction = (action: string) => {
     const g = good.filter((e) => e.action === action).length;
     const b = bad.filter((e) => e.action === action).length;
-    return { g, b, total: graded.filter((e) => e.action === action).length, wr: g + b ? g / (g + b) : 0 };
+    return { g, b, total: final.filter((e) => e.action === action).length, wr: g + b ? g / (g + b) : 0 };
   };
   const buy = byAction('BUY');
   const sell = byAction('SELL');
@@ -79,11 +88,13 @@ export function computeLearning(journal: DeskDecision[]): LearningStats {
   const topLossBiases = [...lossBiasCounts.entries()].sort((a, b) => b[1] - a[1]);
 
   const methods: string[] = [];
-  if (decided === 0) {
-    // No closed trades yet — stay disciplined but DON'T reflexively HOLD; the point
-    // is to build a track record to learn from. Size small, require a clear edge.
+  if (final.length === 0) {
+    // No CLOSED trades yet — don't fabricate lessons from open marks. Note what's
+    // still maturing so the desk stays disciplined without reflexively holding.
     methods.push(
-      'No closed trades to learn from yet — require a clear, corroborated edge and size small, but take real positions so a track record can form.',
+      openTrades.length
+        ? `${openTrades.length} position(s) open and maturing toward their targets — no closed trades to learn from yet; lessons form as each one closes.`
+        : 'No trades placed yet — require a clear, corroborated edge and size small, but take real positions so a track record can form.',
     );
   } else {
     methods.push(
@@ -112,7 +123,8 @@ export function computeLearning(journal: DeskDecision[]): LearningStats {
 
   return {
     total: journal.length,
-    graded: graded.length,
+    graded: final.length,
+    open: openTrades.length,
     good: good.length,
     bad: bad.length,
     neutral: neutral.length,
@@ -130,14 +142,14 @@ export function computeLearning(journal: DeskDecision[]): LearningStats {
 
 function buildPlaybook(journal: DeskDecision[], stats: LearningStats): string {
   const now = new Date().toISOString();
-  const graded = journal.filter((e) => e.grade);
-  const good = graded.filter((e) => e.grade === 'good');
-  const bad = graded.filter((e) => e.grade === 'bad');
+  const final = journal.filter((e) => e.grade && e.executed && e.gradeFinal);
+  const good = final.filter((e) => e.grade === 'good');
+  const bad = final.filter((e) => e.grade === 'bad');
 
   if (stats.graded === 0) {
     return `# The Desk — Learned Playbook
 
-_Generated ${now}. No graded decisions yet — grade runs after positions have had time to move._
+_Generated ${now}. ${stats.open} open position(s), no closed trades yet — the record forms as positions close._
 
 ## Methods (apply these on the next decision)
 ${stats.methods.map((m) => `- ${m}`).join('\n')}
@@ -149,12 +161,13 @@ ${stats.methods.map((m) => `- ${m}`).join('\n')}
 
   return `# The Desk — Learned Playbook
 
-_Generated ${now} from ${stats.graded} graded decisions (${stats.total} total)._
+_Generated ${now} from ${stats.graded} closed trades (${stats.open} still open, ${stats.total} decisions total)._
 
-## Track record
+## Track record (closed trades only)
 - Record: ${stats.good} good / ${stats.bad} bad / ${stats.neutral} neutral → win rate **${pct(stats.winRate)}**
 - Avg in-favor return: ${pct(stats.avgReturnPct)}
 - BUY: ${stats.buy.total} (win ${pct(stats.buy.wr)}) · SELL: ${stats.sell.total} (win ${pct(stats.sell.wr)})
+- Open positions still maturing: ${stats.open}
 
 ## Calibration
 - Avg confidence — winners ${stats.confWin.toFixed(2)} vs losers ${stats.confLoss.toFixed(2)} → confidence is ${stats.calibrated ? 'predictive' : 'NOT yet predictive'}.
@@ -192,6 +205,7 @@ export async function runLearn(): Promise<LearnSummary> {
     generatedAt: new Date().toISOString(),
     total: stats.total,
     graded: stats.graded,
+    open: stats.open,
     good: stats.good,
     bad: stats.bad,
     neutral: stats.neutral,

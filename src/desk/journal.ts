@@ -61,6 +61,13 @@ export interface DeskDecision {
   gradedAt?: string;
   priceAtGrade?: number | null;
   returnPct?: number | null;
+  /**
+   * True once the position has CLOSED (no longer held) — the grade is then the
+   * realized outcome and is locked. While the position is still open the grade is
+   * provisional and re-computed every grading pass as the trade matures toward its
+   * 6–12 month target. The learning pass forms methods from FINAL grades only.
+   */
+  gradeFinal?: boolean;
 }
 
 export function makeId(ts: string, ticker: string): string {

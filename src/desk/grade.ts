@@ -9,8 +9,15 @@
  * and the realized in-favor return. Deterministic (no LLM needed) — it uses the
  * Alpaca quote feed only. The annotated journal is what the learning pass distills.
  */
-import { quote } from '@/tools/broker/alpaca-exec';
+import { quote, positions } from '@/tools/broker/alpaca-exec';
 import { readJournal, overwriteJournal, type DeskDecision, type Grade } from './journal.js';
+
+/** Whether the desk currently holds each symbol — used to tell open trades from closed. */
+interface HeldState {
+  /** False if the positions fetch failed — then we must NOT finalize anything. */
+  known: boolean;
+  symbols: Set<string>;
+}
 
 const GOOD_THRESHOLD = 0.03; // +3% in favor → good
 const BAD_THRESHOLD = -0.03; // -3% against → bad
@@ -60,23 +67,38 @@ function ageHours(ts: string): number {
   return (Date.now() - new Date(ts).getTime()) / 3_600_000;
 }
 
-/** Grade a single entry, returning the annotated copy (or the original if skipped). */
-async function gradeEntry(e: DeskDecision, args: GradeArgs): Promise<{ entry: DeskDecision; graded: boolean; note: string }> {
-  if (e.grade && !args.regrade) return { entry: e, graded: false, note: 'already graded' };
-  if (e.action === 'HOLD' || e.priceAtDecision == null) {
-    return { entry: e, graded: false, note: 'not scoreable (HOLD / no price)' };
+/**
+ * Grade a single entry, returning the annotated copy (or the original if skipped).
+ *
+ * Only EXECUTED trades are scoreable (a HOLD or an unfilled signal is not a trade).
+ * An open trade is re-graded every pass — its grade is provisional and tracks the
+ * position as it matures. Once the position has CLOSED (no longer held) the grade
+ * is the realized outcome and is locked (`gradeFinal`), so the long 6–12 month
+ * horizon is judged on how the trade actually turned out, not on day-one noise.
+ */
+async function gradeEntry(
+  e: DeskDecision,
+  args: GradeArgs,
+  held: HeldState,
+): Promise<{ entry: DeskDecision; graded: boolean; note: string }> {
+  if (!e.executed || e.priceAtDecision == null) {
+    return { entry: e, graded: false, note: 'not a placed trade — skipped' };
   }
+  if (e.gradeFinal && !args.regrade) return { entry: e, graded: false, note: 'final (position closed)' };
   if (ageHours(e.ts) < args.minAgeHours) return { entry: e, graded: false, note: 'too recent' };
 
   const now = await currentPrice(e.ticker);
   if (now == null) return { entry: e, graded: false, note: 'no current price' };
 
   const { grade, signed, reason } = scoreDecision(e.action, e.priceAtDecision, now);
+  // Closed only when we positively know positions AND this symbol is absent — a
+  // failed positions fetch must never finalize an open trade at a stale price.
+  const closed = held.known && !held.symbols.has(e.ticker.toUpperCase());
 
   return {
-    entry: { ...e, grade, gradeReason: reason, gradedAt: new Date().toISOString(), priceAtGrade: now, returnPct: signed },
+    entry: { ...e, grade, gradeReason: reason, gradedAt: new Date().toISOString(), priceAtGrade: now, returnPct: signed, gradeFinal: closed },
     graded: true,
-    note: `${grade}: ${reason}`,
+    note: `${closed ? 'FINAL' : 'open'} ${grade}: ${reason}`,
   };
 }
 
@@ -92,10 +114,17 @@ export async function runGrade(args: GradeArgs = { minAgeHours: 0, regrade: fals
   const lines: string[] = [];
   if (journal.length === 0) return { total: 0, graded: 0, lines };
 
+  // Snapshot current holdings ONCE so we can tell open trades from closed ones.
+  const p = await positions();
+  const held: HeldState = {
+    known: p.ok,
+    symbols: new Set(p.ok ? p.data.map((x) => String(x.symbol).toUpperCase()) : []),
+  };
+
   const updated: DeskDecision[] = [];
   let gradedCount = 0;
   for (const e of journal) {
-    const { entry, graded, note } = await gradeEntry(e, args);
+    const { entry, graded, note } = await gradeEntry(e, args, held);
     updated.push(entry);
     if (graded) gradedCount++;
     lines.push(`${e.ticker} ${e.ts}: ${note}`);
