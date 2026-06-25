@@ -1,7 +1,8 @@
 /**
  * The analyst — turns the research swarm's reports into a buy/sell/hold decision.
- * Long-term value orientation; defaults to HOLD unless the intel and risk/reward
- * clearly justify acting.
+ * Long-term value orientation, but it is here to ALLOCATE CAPITAL: it takes a
+ * position whenever the weighted evidence gives a real edge, and it reads its own
+ * learned playbook so past outcomes shape the next call.
  */
 import { z } from 'zod';
 import { callLlm } from '@/model/llm';
@@ -33,20 +34,26 @@ evidence-backed signals.
 Weigh them into a single action: BUY, SELL, or HOLD.
 
 Discipline:
-- Default to HOLD. Only commit when the weight of evidence and the risk/reward clearly justify it.
+- You are here to ALLOCATE CAPITAL, not to spectate. Take a position (BUY or SELL) whenever the weighted
+  evidence gives a real edge with acceptable risk/reward. HOLD is a legitimate call when the evidence is
+  genuinely balanced or the risk/reward is poor — but it is NOT a default, and NOT a way to dodge a hard call.
+- When a clear, corroborated, multi-domain edge is present, commit: emit BUY (or SELL) with confidence ≥ 0.65.
+  A watchlist of quality names at fair prices should produce real BUYs over time, not perpetual HOLDs.
 - High-weight signals (especially insider selling, regulatory/litigation risk, valuation extremes,
   macro headwinds) should move you more than low-weight noise.
 - Respect any hard guardrails in the account context.
-- Be calibrated: reserve confidence > 0.8 for cases with strong, corroborated, multi-domain evidence.
+- Be calibrated: ~0.5 = genuinely uncertain; reserve confidence > 0.8 for strong, corroborated, multi-domain evidence.
+- Weigh the learned playbook below (if present): repeat what has worked, avoid documented failure patterns.
 - Always produce \`oneLiner\`: a single, punchy sentence a busy reader can act on — the thesis, the main risk, and the verdict in one breath.`;
 
 export async function decide(
   ticker: string,
   reports: ResearchReport[],
   accountContext: string,
-  opts: { model?: string } = {},
+  opts: { model?: string; playbook?: string } = {},
 ): Promise<Decision> {
-  const prompt = `Ticker: ${ticker}
+  const playbookBlock = opts.playbook?.trim() ? `${opts.playbook.trim()}\n\n` : '';
+  const prompt = `${playbookBlock}Ticker: ${ticker}
 
 ## Research reports
 ${renderReports(reports)}

@@ -5,7 +5,10 @@
  */
 import { describe, it, expect } from 'bun:test';
 import { scoreDecision } from './grade.js';
-import { biasesOf } from './learn.js';
+import { biasesOf, computeLearning } from './learn.js';
+import { buyLimitPrice } from './research-run.js';
+import { isLearningQuestion } from './ask.js';
+import { recentLearning, type LearningRecord } from './learning-log.js';
 import type { DeskDecision } from './journal.js';
 
 describe('scoreDecision', () => {
@@ -60,5 +63,66 @@ describe('biasesOf', () => {
 
   it('returns an empty list when none were flagged', () => {
     expect(biasesOf(mk('Behavioral: neutral pressure; biases: none'))).toEqual([]);
+  });
+});
+
+describe('buyLimitPrice (marketable fill)', () => {
+  it('lifts a below-market ideal entry to the current price so the order fills', () => {
+    expect(buyLimitPrice(78, 80)).toBe(80);
+  });
+  it('honors an ideal entry at/above the current price', () => {
+    expect(buyLimitPrice(82, 80)).toBe(82);
+  });
+  it('falls back to the ideal entry when there is no live price', () => {
+    expect(buyLimitPrice(78, null)).toBe(78);
+    expect(buyLimitPrice(78, 0)).toBe(78);
+  });
+});
+
+describe('isLearningQuestion', () => {
+  it('matches questions about what the desk learned', () => {
+    expect(isLearningQuestion('what did you learn today?')).toBe(true);
+    expect(isLearningQuestion('how are we doing on the playbook?')).toBe(true);
+    expect(isLearningQuestion("what's our win rate?")).toBe(true);
+  });
+  it('does not match a normal per-name question', () => {
+    expect(isLearningQuestion('why are we holding KO?')).toBe(false);
+    expect(isLearningQuestion("what's the risk on NVDA?")).toBe(false);
+  });
+});
+
+describe('computeLearning', () => {
+  const mk = (over: Partial<DeskDecision>): DeskDecision => ({
+    id: 'x', ts: '2026-01-01T00:00:00.000Z', ticker: 'AAPL', action: 'BUY', sizeUsd: 0,
+    confidence: 0.7, thesisDigest: '', debateDigest: '', priceAtDecision: 100,
+    executed: true, executionNote: '', ...over,
+  });
+
+  it('reports zero graded and a build-a-record method on an all-HOLD journal', () => {
+    const s = computeLearning([mk({ action: 'HOLD', grade: undefined })]);
+    expect(s.graded).toBe(0);
+    expect(s.methods.join(' ')).toMatch(/track record|size small|real positions/i);
+  });
+
+  it('computes win rate and calibration from graded trades', () => {
+    const s = computeLearning([
+      mk({ grade: 'good', confidence: 0.8, returnPct: 0.1 }),
+      mk({ grade: 'bad', confidence: 0.6, returnPct: -0.1 }),
+    ]);
+    expect(s.graded).toBe(2);
+    expect(s.winRate).toBeCloseTo(0.5, 5);
+    expect(s.calibrated).toBe(true); // winners (0.8) more confident than losers (0.6)
+  });
+});
+
+describe('recentLearning', () => {
+  const rec = (date: string): LearningRecord => ({
+    date, generatedAt: `${date}T20:00:00.000Z`, total: 1, graded: 0, good: 0, bad: 0,
+    neutral: 0, winRate: 0, avgReturnPct: 0, methods: [],
+  });
+
+  it('keeps the last record per day, newest first, capped at n', () => {
+    const out = recentLearning([rec('2026-06-23'), rec('2026-06-24'), rec('2026-06-24'), rec('2026-06-25')], 2);
+    expect(out.map((r) => r.date)).toEqual(['2026-06-25', '2026-06-24']);
   });
 });

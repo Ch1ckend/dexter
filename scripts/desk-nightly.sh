@@ -22,4 +22,4 @@ cd "$HOME/Projects/dexter" || exit 1
 
 echo "===== desk-nightly $(date '+%Y-%m-%d %H:%M:%S %Z') ====="
 bun run src/desk/research-run.ts --watchlist --execute \
-  --confidence 0.7 --model openrouter:openai/gpt-4o-mini
+  --confidence 0.6 --model openrouter:openai/gpt-4o-mini

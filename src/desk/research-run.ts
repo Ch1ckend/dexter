@@ -22,11 +22,25 @@ import { strategize } from './strategy.js';
 import { account, guardrails, quote, positionFor, placeOrder } from '@/tools/broker/alpaca-exec';
 import { appendDecision, makeId, type DeskDecision, type DeskAction } from './journal.js';
 import { notify } from './notify.js';
+import { loadPlaybook, playbookBlock } from './playbook.js';
 import type { ResearchReport } from './research/types.js';
 import type { Decision } from './decide.js';
 import type { Strategy } from './strategy.js';
 
 const DEFAULT_CONFIDENCE = 0.6;
+
+/**
+ * The limit price to actually fill a BUY. The strategist sets a disciplined ideal
+ * entry that often sits BELOW the market — a plain limit there rests unfilled, so
+ * the desk "decides" but never trades. We make the order MARKETABLE: if the ideal
+ * entry is at/above the current price we honor it; if it's below, we lift to the
+ * current price so the order fills now. Falls back to the ideal entry when we have
+ * no live price. Pure + exported for unit testing.
+ */
+export function buyLimitPrice(entryPrice: number, currentPrice: number | null): number {
+  if (currentPrice == null || !isFinite(currentPrice) || currentPrice <= 0) return entryPrice;
+  return Math.max(entryPrice, currentPrice);
+}
 
 interface Args {
   tickers: string[];
@@ -132,22 +146,25 @@ async function executeAndJournal(
   } else if (!args.execute) {
     executionNote = 'dry-run — limit order suppressed';
   } else if (decision.action === 'BUY') {
-    qty = Math.floor(sizeUsd / strategy.entryPrice);
+    // Marketable limit: lift a below-market ideal entry to the current price so the
+    // order actually FILLS (a resting limit below market is why the desk never traded).
+    const limit = buyLimitPrice(strategy.entryPrice, price);
+    qty = Math.floor(sizeUsd / limit);
     if (qty < 1) {
-      executionNote = `size $${sizeUsd.toFixed(0)} < 1 share at entry $${strategy.entryPrice} — skipped`;
+      executionNote = `size $${sizeUsd.toFixed(0)} < 1 share at $${limit.toFixed(2)} — skipped`;
     } else {
       // Attach the strategist's target/stop as a protective bracket so the exit
       // activates the moment the entry fills — but only if the legs are sane
-      // (target > entry > stop); otherwise fall back to a plain limit buy.
+      // relative to the ACTUAL fill price (target > limit > stop); else plain limit buy.
       const bracket =
-        strategy.targetPrice > strategy.entryPrice && strategy.stopPrice > 0 && strategy.stopPrice < strategy.entryPrice
+        strategy.targetPrice > limit && strategy.stopPrice > 0 && strategy.stopPrice < limit
           ? { takeProfit: strategy.targetPrice, stop: strategy.stopPrice }
           : undefined;
-      const res = await placeOrder('buy', ticker, qty, strategy.entryPrice, bracket); // LIMIT at ideal entry
+      const res = await placeOrder('buy', ticker, qty, limit, bracket); // marketable LIMIT
       executed = res.ok;
       orderId = res.ok ? res.data.id : null;
       const exitNote = bracket ? ` + bracket TP $${strategy.targetPrice}/SL $${strategy.stopPrice}` : ' (no bracket — bad legs)';
-      executionNote = res.ok ? `LIMIT buy ${qty} @ $${strategy.entryPrice}${exitNote}` : res.refused ? `REFUSED: ${res.reason}` : `ERROR: ${res.error}`;
+      executionNote = res.ok ? `LIMIT buy ${qty} @ $${limit.toFixed(2)}${exitNote}` : res.refused ? `REFUSED: ${res.reason}` : `ERROR: ${res.error}`;
     }
   } else {
     // SELL — only trim an existing long (no shorting), as a limit at the target.
@@ -242,6 +259,11 @@ async function main(): Promise<void> {
   const serial = (args.model ?? '').includes(':free');
   const swarmOpts: SwarmOptions = { model: args.model, serial };
 
+  // Load the self-authored playbook ONCE and inject it into every decision, so the
+  // desk recalls what its own past trades taught it (the recall half of "learn").
+  const playbook = playbookBlock(await loadPlaybook());
+  if (playbook) console.log('📖 Recalling learned playbook into every decision.\n');
+
   console.log(`The Desk (research swarm) — ${tickers.join(', ')}${args.execute ? ' [EXECUTE]' : ' [dry-run]'}${serial ? ' [serial/free]' : ''}`);
   console.log(ctx.text + '\n');
 
@@ -251,7 +273,7 @@ async function main(): Promise<void> {
       const { name } = await resolveCik(ticker).catch(() => ({ name: ticker }));
       const price = await currentPrice(ticker);
       const reports = await runResearchSwarm(ticker, name, swarmOpts);
-      const decision = await decide(ticker, reports, ctx.text, { model: args.model });
+      const decision = await decide(ticker, reports, ctx.text, { model: args.model, playbook });
       const strategy = await strategize(ticker, decision, reports, price, { model: args.model });
       printReport(ticker, reports, decision, strategy, price);
       const entry = await executeAndJournal(ticker, reports, decision, strategy, price, ctx, args);

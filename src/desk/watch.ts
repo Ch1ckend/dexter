@@ -53,7 +53,7 @@ function buildReviewParagraph(opts: {
       ? `Graded ${grade.graded}/${grade.total} past trades against current prices.`
       : `With no executed BUY/SELL trades to score, there was nothing to grade (${grade.graded}/${grade.total}).`;
 
-  const forward = `The desk only acts above its 0.70 conviction bar, so cash-and-patient is the expected state until a setup clears it. Next research run: 08:30 ET.`;
+  const forward = `The desk acts above its 0.60 conviction bar and fills buys at the market, so positions build as setups clear. Next research run: 08:30 ET.`;
 
   return [
     `📈 The Desk — Daily Review · ${etDate()} (after close)`,
@@ -84,14 +84,14 @@ async function main(): Promise<void> {
 
   const g = await runGrade({ minAgeHours: 0, regrade: false });
 
-  let learnNote = '';
-  if (doLearn) {
-    const l = await runLearn();
-    learnNote =
-      l.graded > 0
-        ? ` Playbook re-distilled from ${l.graded} graded trades.`
-        : ` Weekly playbook pass ran, but with no closed trades there's nothing new to distill yet.`;
-  }
+  // Distill + record learning EVERY day, so the durable learning log captures the
+  // day-by-day memory (and the desk can recall "what did you learn today?"). The
+  // --learn flag now just marks the weekly emphasis in the note.
+  const l = await runLearn();
+  const learnNote =
+    l.graded > 0
+      ? ` ${doLearn ? 'Weekly playbook re-distill' : 'Playbook updated'} from ${l.graded} graded trades; learning logged for ${l.record.date}.`
+      : ` No closed trades to distill yet, but the day's learning state was logged (${l.record.date}).`;
 
   const msg = buildReviewParagraph({ equity, cash, positionsText, hasPositions, today: todays, grade: g, learnNote });
   console.log(msg);

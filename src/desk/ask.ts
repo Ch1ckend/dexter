@@ -13,6 +13,8 @@
 import { callLlm } from '@/model/llm';
 import { withRateLimitRetry } from './llmRetry.js';
 import { readJournal, type DeskDecision } from './journal.js';
+import { loadPlaybook } from './playbook.js';
+import { readLearningLog, recentLearning, renderLearning } from './learning-log.js';
 
 const DEFAULT_MODEL = 'openrouter:openai/gpt-4o-mini';
 
@@ -37,6 +39,17 @@ const NAME_TO_TICKER: Record<string, string> = {
 
 const etDate = (ts: string): string =>
   new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+/**
+ * Is this a question about what the desk has LEARNED (its track record / lessons /
+ * playbook), rather than about one name's decision? These are answered from the
+ * durable learning log + playbook so the desk can recall what it learned per day.
+ */
+export function isLearningQuestion(question: string): boolean {
+  return /\b(learn|learned|lesson|lessons|playbook|track record|how are (we|you) doing|performance|win rate|what.*chang(e|ed)|getting (better|smarter)|improv)/i.test(
+    question,
+  );
+}
 
 /** Resolve a ticker from free text against the symbols the desk has actually decided on. */
 export function extractTicker(question: string, knownTickers: string[]): string | null {
@@ -108,6 +121,21 @@ export async function askDesk(
 ): Promise<AskResult> {
   const journal = await readJournal().catch(() => [] as DeskDecision[]);
   const known = [...new Set(journal.map((d) => d.ticker))];
+
+  // "What did you learn today / how are we doing?" — answer from the desk's durable
+  // learning memory (the day-by-day log + the latest playbook), not a single name.
+  if (isLearningQuestion(question)) {
+    const [playbook, log] = await Promise.all([loadPlaybook().catch(() => ''), readLearningLog().catch(() => [])]);
+    const recent = recentLearning(log, 7);
+    const grounding = `## Learning log (most recent days)\n${renderLearning(recent)}\n\n## Current playbook\n${playbook.trim() || '(empty — nothing distilled yet)'}`;
+    const prompt = `The desk's recorded learning memory:\n\n${grounding}\n\n---\nTeammate's question: ${question}\n\nAnswer as the desk's analyst, grounded ONLY in the learning memory above. If it's empty, say the desk hasn't closed enough trades to learn yet.`;
+    const { response } = await withRateLimitRetry(() =>
+      callLlm(prompt, { systemPrompt: DESK_PERSONA, model: opts.model ?? DEFAULT_MODEL }),
+    );
+    const text = typeof response === 'string' ? response : String((response as { content?: string })?.content ?? '');
+    return { ticker: null, found: recent.length > 0, answer: text.trim() };
+  }
+
   // Resolve the ticker from the question; fall back to context (e.g. the post being replied to).
   const ticker = extractTicker(question, known) ?? (opts.contextHint ? extractTicker(opts.contextHint, known) : null);
 

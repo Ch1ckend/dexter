@@ -28,6 +28,15 @@ export const JOURNAL_PATH = process.env.DESK_JOURNAL_PATH || join(TRADING_DIR, '
 export const PLAYBOOK_PATH = process.env.DESK_PLAYBOOK_PATH || join(TRADING_DIR, 'playbook.md');
 
 /**
+ * Dated, append-only history of what the desk learned each day (one JSON line per
+ * learning pass). The playbook is the LATEST snapshot; this is the durable memory
+ * the desk can recall day-by-day ("what did you learn today?"). Override with
+ * DESK_LEARNING_LOG_PATH.
+ */
+export const LEARNING_LOG_PATH =
+  process.env.DESK_LEARNING_LOG_PATH || join(TRADING_DIR, 'learning-log.jsonl');
+
+/**
  * The guardrailed _ALPACA paper-trading CLI. The Desk shells this for execution
  * rather than re-implementing the order path — all caps/allowlist/paper-only
  * enforcement stays in one place. Override with ALPACA_CLI for tests.

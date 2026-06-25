@@ -19,4 +19,4 @@ cd "$REPO" || exit 1
 
 echo "===== desk-nightly $(date '+%F %T %Z') ====="
 exec bun run src/desk/research-run.ts --watchlist --execute \
-  --confidence "${DESK_CONFIDENCE:-0.7}" --model "${DESK_MODEL:-openrouter:openai/gpt-4o-mini}"
+  --confidence "${DESK_CONFIDENCE:-0.6}" --model "${DESK_MODEL:-openrouter:openai/gpt-4o-mini}"
