@@ -10,11 +10,25 @@
  * next debate. Deterministic — runs without any LLM key. This closes the loop:
  * the system learns from itself and forms methods from its own outcomes.
  */
-import { readJournal, type DeskDecision } from './journal.js';
+import { readJournal, type DeskDecision, type HorizonStat } from './journal.js';
 import { savePlaybook } from './playbook.js';
 import { appendLearning, type LearningRecord } from './learning-log.js';
+import { CHECKPOINT_HORIZONS } from './grade.js';
 
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+
+/** Aggregate outcome across all executed trades at one fixed horizon checkpoint. */
+export function horizonStats(journal: DeskDecision[], key: string): HorizonStat {
+  const marks = journal.filter((e) => e.executed && e.checkpoints?.[key]).map((e) => e.checkpoints![key]);
+  const decided = marks.filter((m) => m.grade !== 'neutral');
+  const wins = decided.filter((m) => m.grade === 'good').length;
+  return {
+    key,
+    n: marks.length,
+    winRate: decided.length ? wins / decided.length : 0,
+    avgReturnPct: marks.length ? marks.reduce((a, m) => a + m.returnPct, 0) / marks.length : 0,
+  };
+}
 const etDate = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
 /** Pull the biases the Behavioral Guard flagged, parsed from the debate digest. */
@@ -47,6 +61,8 @@ export interface LearningStats {
   buy: { g: number; b: number; total: number; wr: number };
   sell: { g: number; b: number; total: number; wr: number };
   topLossBiases: [string, number][];
+  /** Leading diagnostics: outcome at each fixed horizon (5d/20d/60d), if any marks exist. */
+  horizons: HorizonStat[];
   methods: string[];
 }
 
@@ -87,6 +103,9 @@ export function computeLearning(journal: DeskDecision[]): LearningStats {
   for (const e of bad) for (const b of biasesOf(e)) lossBiasCounts.set(b, (lossBiasCounts.get(b) ?? 0) + 1);
   const topLossBiases = [...lossBiasCounts.entries()].sort((a, b) => b[1] - a[1]);
 
+  // Leading diagnostics: how trades look at each fixed horizon (only those with marks).
+  const horizons = CHECKPOINT_HORIZONS.map((h) => horizonStats(journal, h.key)).filter((s) => s.n > 0);
+
   const methods: string[] = [];
   if (final.length === 0) {
     // No CLOSED trades yet — don't fabricate lessons from open marks. Note what's
@@ -121,6 +140,14 @@ export function computeLearning(journal: DeskDecision[]): LearningStats {
     }
   }
 
+  // Leading-indicator read from the fixed horizons (diagnostic, not the verdict).
+  const lead = horizons.find((h) => h.key === 'd20') ?? horizons.find((h) => h.key === 'd5');
+  if (lead) {
+    methods.push(
+      `Leading read — at ${lead.key.replace('d', '')}d, trades average ${pct(lead.avgReturnPct)} in-favor across ${lead.n} mark(s). Diagnostic only; the verdict is the close-horizon outcome.`,
+    );
+  }
+
   return {
     total: journal.length,
     graded: final.length,
@@ -136,6 +163,7 @@ export function computeLearning(journal: DeskDecision[]): LearningStats {
     buy,
     sell,
     topLossBiases,
+    horizons,
     methods,
   };
 }
@@ -171,7 +199,7 @@ _Generated ${now} from ${stats.graded} closed trades (${stats.open} still open, 
 
 ## Calibration
 - Avg confidence — winners ${stats.confWin.toFixed(2)} vs losers ${stats.confLoss.toFixed(2)} → confidence is ${stats.calibrated ? 'predictive' : 'NOT yet predictive'}.
-
+${stats.horizons.length ? `\n## Horizon checkpoints (leading diagnostic — not the verdict)\n${stats.horizons.map((h) => `- ${h.key.replace('d', '')}d: ${h.n} mark(s), avg ${pct(h.avgReturnPct)} in-favor, win rate ${pct(h.winRate)}`).join('\n')}\n` : ''}
 ## What worked
 ${good.length ? good.slice(0, 8).map(tradeLine).join('\n') : '_none yet_'}
 
@@ -211,6 +239,7 @@ export async function runLearn(): Promise<LearnSummary> {
     neutral: stats.neutral,
     winRate: stats.winRate,
     avgReturnPct: stats.avgReturnPct,
+    horizons: stats.horizons,
     methods: stats.methods,
   };
   await appendLearning(record);

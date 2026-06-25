@@ -4,12 +4,12 @@
  * independent of any LLM or network.
  */
 import { describe, it, expect } from 'bun:test';
-import { scoreDecision } from './grade.js';
-import { biasesOf, computeLearning } from './learn.js';
+import { scoreDecision, dueCheckpoints } from './grade.js';
+import { biasesOf, computeLearning, horizonStats } from './learn.js';
 import { buyLimitPrice } from './research-run.js';
 import { isLearningQuestion } from './ask.js';
 import { recentLearning, type LearningRecord } from './learning-log.js';
-import type { DeskDecision } from './journal.js';
+import type { DeskDecision, Checkpoint } from './journal.js';
 
 describe('scoreDecision', () => {
   it('grades a BUY that rose as good', () => {
@@ -125,6 +125,58 @@ describe('computeLearning', () => {
     expect(s.open).toBe(1);
     expect(s.winRate).toBeCloseTo(0.5, 5);
     expect(s.calibrated).toBe(true); // winners (0.8) more confident than losers (0.6)
+  });
+});
+
+describe('dueCheckpoints (multi-horizon marks)', () => {
+  const at = '2026-01-10T00:00:00.000Z';
+
+  it('captures no checkpoint before the first horizon elapses', () => {
+    const cps = dueCheckpoints(2, undefined, 'BUY', 100, 105, at);
+    expect(Object.keys(cps)).toEqual([]);
+  });
+
+  it('captures d5 once 5 days have passed, with the in-favor return', () => {
+    const cps = dueCheckpoints(6, undefined, 'BUY', 100, 110, at);
+    expect(cps.d5).toBeDefined();
+    expect(cps.d5.grade).toBe('good');
+    expect(cps.d5.returnPct).toBeCloseTo(0.1, 5);
+    expect(cps.d20).toBeUndefined();
+  });
+
+  it('does not overwrite an existing checkpoint (captured once)', () => {
+    const existing: Record<string, Checkpoint> = {
+      d5: { ageDays: 5, price: 110, returnPct: 0.1, grade: 'good', capturedAt: at },
+    };
+    const cps = dueCheckpoints(25, existing, 'BUY', 100, 90, at);
+    expect(cps.d5.price).toBe(110); // untouched
+    expect(cps.d20).toBeDefined(); // newly due
+    expect(cps.d20.grade).toBe('bad');
+  });
+
+  it('captures a close mark when the position has closed', () => {
+    const cps = dueCheckpoints(40, undefined, 'BUY', 100, 130, at, true);
+    expect(cps.close).toBeDefined();
+    expect(cps.close.grade).toBe('good');
+  });
+});
+
+describe('horizonStats', () => {
+  const mk = (cp: Record<string, Checkpoint>): DeskDecision => ({
+    id: 'x', ts: '2026-01-01T00:00:00.000Z', ticker: 'AAPL', action: 'BUY', sizeUsd: 0,
+    confidence: 0.7, thesisDigest: '', debateDigest: '', priceAtDecision: 100,
+    executed: true, executionNote: '', checkpoints: cp,
+  });
+  const cp = (grade: 'good' | 'bad' | 'neutral', r: number): Checkpoint => ({ ageDays: 20, price: 0, returnPct: r, grade, capturedAt: 'x' });
+
+  it('aggregates win rate and avg return at a horizon across trades', () => {
+    const s = horizonStats(
+      [mk({ d20: cp('good', 0.1) }), mk({ d20: cp('bad', -0.05) }), mk({ d20: cp('neutral', 0.01) })],
+      'd20',
+    );
+    expect(s.n).toBe(3);
+    expect(s.winRate).toBeCloseTo(0.5, 5); // 1 good / 2 decided (neutral excluded)
+    expect(s.avgReturnPct).toBeCloseTo(0.02, 5); // (0.1 - 0.05 + 0.01)/3
   });
 });
 

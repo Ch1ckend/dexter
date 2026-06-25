@@ -14,6 +14,34 @@ import { JOURNAL_PATH, TRADING_DIR } from './paths.js';
 export type DeskAction = 'BUY' | 'SELL' | 'HOLD';
 export type Grade = 'good' | 'bad' | 'neutral';
 
+/**
+ * A mark-to-market snapshot of a trade at a fixed horizon after entry (e.g. 5d,
+ * 20d, 60d, or at close). Captured once, the first grading pass after the horizon
+ * elapses — so a long-held trade still yields FAST, horizon-tagged learning signal
+ * without being closed early. Diagnostic for short horizons; the verdict is `close`.
+ */
+export interface Checkpoint {
+  /** Actual age in days when this mark was captured. */
+  ageDays: number;
+  /** Mark price at the horizon. */
+  price: number;
+  /** In-favor return vs the decision price at this horizon. */
+  returnPct: number;
+  grade: Grade;
+  capturedAt: string;
+}
+
+/** Aggregate outcome across all trades at one horizon (e.g. how BUYs look at 20d). */
+export interface HorizonStat {
+  key: string;
+  /** Number of trades with a mark at this horizon. */
+  n: number;
+  /** Win rate over decided (non-neutral) marks at this horizon, 0..1. */
+  winRate: number;
+  /** Average in-favor return across marks at this horizon, 0..1. */
+  avgReturnPct: number;
+}
+
 export interface DeskDecision {
   /** Stable id: `${ts}:${ticker}`. */
   id: string;
@@ -68,6 +96,12 @@ export interface DeskDecision {
    * 6–12 month target. The learning pass forms methods from FINAL grades only.
    */
   gradeFinal?: boolean;
+  /**
+   * Mark-to-market snapshots at fixed horizons after entry, keyed by horizon
+   * (e.g. 'd5', 'd20', 'd60', 'close'). Each captured once. Gives fast, horizon-
+   * tagged learning signal on a long-held book without closing positions early.
+   */
+  checkpoints?: Record<string, Checkpoint>;
 }
 
 export function makeId(ts: string, ticker: string): string {

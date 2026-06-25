@@ -10,7 +10,45 @@
  * Alpaca quote feed only. The annotated journal is what the learning pass distills.
  */
 import { quote, positions } from '@/tools/broker/alpaca-exec';
-import { readJournal, overwriteJournal, type DeskDecision, type Grade } from './journal.js';
+import { readJournal, overwriteJournal, type DeskDecision, type Grade, type Checkpoint } from './journal.js';
+
+/**
+ * Fixed learning horizons (calendar days after entry). Short ones are leading
+ * diagnostics; 'close' is the verdict. Decoupled from the 6–12 month HOLDING
+ * horizon on purpose: we measure fast without trading fast.
+ */
+export const CHECKPOINT_HORIZONS: { key: string; days: number }[] = [
+  { key: 'd5', days: 5 },
+  { key: 'd20', days: 20 },
+  { key: 'd60', days: 60 },
+];
+
+/**
+ * Pure: capture any horizon checkpoints whose window has elapsed and aren't yet
+ * recorded. Captured once each (first pass after the horizon), so the mark is the
+ * price ~N days after entry. Returns the (possibly extended) checkpoint map.
+ */
+export function dueCheckpoints(
+  ageDays: number,
+  existing: Record<string, Checkpoint> | undefined,
+  action: DeskDecision['action'],
+  priceAtDecision: number,
+  current: number,
+  capturedAt: string,
+  closed = false,
+): Record<string, Checkpoint> {
+  const out: Record<string, Checkpoint> = { ...(existing ?? {}) };
+  const mark = (): Checkpoint => {
+    const { grade, signed } = scoreDecision(action, priceAtDecision, current);
+    return { ageDays: Math.round(ageDays), price: current, returnPct: signed, grade, capturedAt };
+  };
+  for (const h of CHECKPOINT_HORIZONS) {
+    if (ageDays >= h.days && !out[h.key]) out[h.key] = mark();
+  }
+  // The realized verdict at close, captured once.
+  if (closed && !out.close) out.close = mark();
+  return out;
+}
 
 /** Whether the desk currently holds each symbol — used to tell open trades from closed. */
 interface HeldState {
@@ -95,10 +133,14 @@ async function gradeEntry(
   // failed positions fetch must never finalize an open trade at a stale price.
   const closed = held.known && !held.symbols.has(e.ticker.toUpperCase());
 
+  const capturedAt = new Date().toISOString();
+  const checkpoints = dueCheckpoints(ageHours(e.ts) / 24, e.checkpoints, e.action, e.priceAtDecision, now, capturedAt, closed);
+  const newMarks = Object.keys(checkpoints).filter((k) => !e.checkpoints?.[k]);
+
   return {
-    entry: { ...e, grade, gradeReason: reason, gradedAt: new Date().toISOString(), priceAtGrade: now, returnPct: signed, gradeFinal: closed },
+    entry: { ...e, grade, gradeReason: reason, gradedAt: capturedAt, priceAtGrade: now, returnPct: signed, gradeFinal: closed, checkpoints },
     graded: true,
-    note: `${closed ? 'FINAL' : 'open'} ${grade}: ${reason}`,
+    note: `${closed ? 'FINAL' : 'open'} ${grade}: ${reason}${newMarks.length ? ` [+${newMarks.join(',')}]` : ''}`,
   };
 }
 
