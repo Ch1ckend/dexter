@@ -77,6 +77,10 @@ describe('buyLimitPrice (marketable fill)', () => {
     expect(buyLimitPrice(78, null)).toBe(78);
     expect(buyLimitPrice(78, 0)).toBe(78);
   });
+  it('rounds a sub-penny price UP to a whole cent (Alpaca rejects sub-penny limits)', () => {
+    expect(buyLimitPrice(0, 192.745)).toBe(192.75);
+    expect(buyLimitPrice(192.741, null)).toBe(192.75);
+  });
 });
 
 describe('isLearningQuestion', () => {

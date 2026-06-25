@@ -29,17 +29,23 @@ import type { Strategy } from './strategy.js';
 
 const DEFAULT_CONFIDENCE = 0.6;
 
+/** Round UP to a whole cent — Alpaca rejects sub-penny limit prices on ≥$1 stocks. */
+function ceilToPenny(n: number): number {
+  return Math.ceil(n * 100) / 100;
+}
+
 /**
  * The limit price to actually fill a BUY. The strategist sets a disciplined ideal
  * entry that often sits BELOW the market — a plain limit there rests unfilled, so
  * the desk "decides" but never trades. We make the order MARKETABLE: if the ideal
  * entry is at/above the current price we honor it; if it's below, we lift to the
- * current price so the order fills now. Falls back to the ideal entry when we have
- * no live price. Pure + exported for unit testing.
+ * current price so the order fills now. The result is rounded UP to a whole cent
+ * (Alpaca rejects sub-penny limits like 192.745). Falls back to the ideal entry
+ * (penny-rounded) when we have no live price. Pure + exported for unit testing.
  */
 export function buyLimitPrice(entryPrice: number, currentPrice: number | null): number {
-  if (currentPrice == null || !isFinite(currentPrice) || currentPrice <= 0) return entryPrice;
-  return Math.max(entryPrice, currentPrice);
+  if (currentPrice == null || !isFinite(currentPrice) || currentPrice <= 0) return ceilToPenny(entryPrice);
+  return ceilToPenny(Math.max(entryPrice, currentPrice));
 }
 
 interface Args {
